@@ -5,131 +5,190 @@ const OrderModel = require('../models/Order');
 const OrderItemModel = require('../models/OrderItem');
 const OrderStatusHistoryModel = require('../models/OrderStatusHistory');
 const logger = require('../utils/logger');
+const connectDatabase = require('../config/database');
 
-// Initialize Sequelize connection
-const sequelize = new Sequelize(config.PG_CONFIG);
-const MenuItem = MenuItemModel(sequelize);
-const Order = OrderModel(sequelize);
-const OrderItem = OrderItemModel(sequelize);
-const OrderStatusHistory = OrderStatusHistoryModel(sequelize);
+let sequelize;
+let MenuItem;
+let Order;
+let OrderItem;
+let OrderStatusHistory;
 
-// Set up associations
-Order.hasMany(OrderItem, { foreignKey: 'order_id', as: 'items' });
-OrderItem.belongsTo(Order, { foreignKey: 'order_id' });
-OrderItem.belongsTo(MenuItem, { foreignKey: 'menu_item_id', as: 'menuItem' });
-Order.hasMany(OrderStatusHistory, { foreignKey: 'order_id', as: 'statusHistory' });
-OrderStatusHistory.belongsTo(Order, { foreignKey: 'order_id' });
+// Initialize models
+async function initializeModels() {
+  try {
+    sequelize = await connectDatabase();
+    
+    // Initialize models
+    MenuItem = MenuItemModel(sequelize);
+    Order = OrderModel(sequelize);
+    OrderItem = OrderItemModel(sequelize);
+    OrderStatusHistory = OrderStatusHistoryModel(sequelize);
+
+    // Set up associations
+    Order.hasMany(OrderItem, { foreignKey: 'order_id', as: 'items' });
+    OrderItem.belongsTo(Order, { foreignKey: 'order_id' });
+    OrderItem.belongsTo(MenuItem, { foreignKey: 'menu_item_id', as: 'menuItem' });
+    Order.hasMany(OrderStatusHistory, { foreignKey: 'order_id', as: 'statusHistory' });
+    OrderStatusHistory.belongsTo(Order, { foreignKey: 'order_id' });
+
+    return true;
+  } catch (error) {
+    logger.error('Failed to initialize models:', error);
+    throw error;
+  }
+}
 
 // Place new order
 const placeOrder = async (req, res) => {
   try {
-    const { customerName, customerPhone, customerEmail, items, specialInstructions } = req.body;
-
-    console.log('Received order request:', { customerName, customerPhone, customerEmail, items });
-
-    // Validate required fields
-    if (!customerName || !items || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Customer name and items are required',
-      });
+    // Ensure models are initialized
+    if (!sequelize) {
+      await initializeModels();
     }
 
-    // Fetch menu items and validate
-    const menuItemIds = items.map(item => item.menuItemId);
-    const menuItems = await MenuItem.findAll({
-      where: {
-        id: menuItemIds,
-        is_available: true,
-      },
-    });
+    const transaction = await sequelize.transaction();
+    
+    try {
+      const { customerName, customerPhone, customerEmail, items, specialInstructions } = req.body;
 
-    if (menuItems.length !== menuItemIds.length) {
-      return res.status(400).json({
-        success: false,
-        message: 'Some menu items are not available',
+      console.log('Received order request:', {
+        customerName,
+        customerPhone,
+        customerEmail,
+        items,
+        specialInstructions
       });
-    }
 
-    // Calculate total amount
-    let totalAmount = 0;
-    const orderItemsData = [];
-
-    for (const item of items) {
-      const menuItem = menuItems.find(mi => mi.id === item.menuItemId);
-      if (!menuItem) {
+      // Validate required fields
+      if (!customerName || !items || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({
           success: false,
-          message: `Menu item with ID ${item.menuItemId} not found`,
+          message: 'Customer name and items are required',
         });
       }
 
-      const itemTotal = menuItem.price * item.quantity;
-      totalAmount += itemTotal;
+      // Fetch menu items and validate within transaction
+      const menuItemIds = items.map(item => item.menuItemId);
+      const menuItems = await MenuItem.findAll({
+        where: {
+          id: menuItemIds,
+          is_available: true,
+        },
+        transaction
+      });
 
-      orderItemsData.push({
-        menu_item_id: item.menuItemId,
-        quantity: item.quantity,
-        item_name: menuItem.name,
-        item_price: menuItem.price,
-        subtotal: itemTotal,
-        special_instructions: item.specialInstructions || null,
+      console.log('Found menu items:', menuItems.map(item => ({
+        id: item.id,
+        name: item.name,
+        price: item.price
+      })));
+
+      if (menuItems.length !== menuItemIds.length) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: 'Some menu items are not available',
+          availableItems: menuItems.map(item => item.id),
+          requestedItems: menuItemIds
+        });
+      }
+
+      // Calculate total amount
+      let totalAmount = 0;
+      const orderItemsData = [];
+
+      for (const item of items) {
+        const menuItem = menuItems.find(mi => mi.id === item.menuItemId);
+        if (!menuItem) {
+          await transaction.rollback();
+          return res.status(400).json({
+            success: false,
+            message: `Menu item with ID ${item.menuItemId} not found`,
+          });
+        }
+
+        const itemTotal = menuItem.price * item.quantity;
+        totalAmount += itemTotal;
+
+        orderItemsData.push({
+          menu_item_id: item.menuItemId,
+          quantity: item.quantity,
+          item_name: menuItem.name,
+          item_price: menuItem.price,
+          subtotal: itemTotal,
+          special_instructions: item.specialInstructions || null,
+        });
+      }
+
+      // Create order within transaction
+      const orderData = {
+        customer_name: customerName.trim(),
+        customer_phone: customerPhone || "Not provided",
+        customer_email: customerEmail || "Not provided",
+        total_amount: totalAmount,
+        special_instructions: specialInstructions || null,
+        payment_method: 'cash',
+        order_status: 'pending',
+        payment_status: 'pending'
+      };
+
+      console.log('Creating order with data:', orderData);
+
+      const order = await Order.create(orderData, { transaction });
+
+      // Create order items within transaction
+      const orderItemsWithOrderId = orderItemsData.map(item => ({
+        ...item,
+        order_id: order.id,
+      }));
+
+      await OrderItem.bulkCreate(orderItemsWithOrderId, { transaction });
+
+      // Create initial status history
+      await OrderStatusHistory.create({
+        order_id: order.id,
+        old_status: null,
+        new_status: 'pending',
+        changed_by: 'system',
+        notes: 'Order placed',
+        changed_at: new Date()
+      }, { transaction });
+
+      // Commit transaction
+      await transaction.commit();
+
+      res.status(201).json({
+        success: true,
+        message: 'Order placed successfully',
+        data: {
+          id: order.id,
+          customerName: order.customer_name,
+          customerPhone: order.customer_phone,
+          customerEmail: order.customer_email,
+          totalAmount: parseFloat(order.total_amount),
+          status: order.order_status,
+          paymentStatus: order.payment_status,
+          items: orderItemsData,
+          createdAt: order.created_at,
+        },
+      });
+
+    } catch (error) {
+      await transaction.rollback();
+      console.error('Error placing order:', {
+        error: error.message,
+        stack: error.stack,
+        body: req.body
+      });
+      
+      res.status(500).json({
+        success: false,
+        message: 'Failed to place order',
+        error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error',
       });
     }
-
-    // Create order
-    const orderData = {
-      customer_name: customerName.trim(),
-      customer_phone: customerPhone || "Not provided",
-      customer_email: customerEmail || "Not provided",
-      total_amount: totalAmount,
-      special_instructions: specialInstructions || null,
-      payment_method: 'cash',
-    };
-
-    console.log('Creating order with data:', orderData);
-
-    const order = await Order.create(orderData);
-
-    // Create order items
-    const orderItemsWithOrderId = orderItemsData.map(item => ({
-      ...item,
-      order_id: order.id,
-    }));
-
-    await OrderItem.bulkCreate(orderItemsWithOrderId);
-
-    // FIXED: Create initial status history with correct field names
-    await OrderStatusHistory.create({
-      order_id: order.id,
-      old_status: null, // First status, so old status is null
-      new_status: 'pending', // Using correct field name
-      changed_by: 'system',
-      notes: 'Order placed',
-      changed_at: new Date(),
-    });
-
-    res.status(201).json({
-      success: true,
-      message: 'Order placed successfully',
-      data: {
-        id: order.id,
-        customerName: order.customer_name,
-        customerPhone: order.customer_phone,
-        customerEmail: order.customer_email,
-        totalAmount: parseFloat(order.total_amount),
-        status: order.order_status,
-        paymentStatus: order.payment_status,
-        items: orderItemsData,
-        createdAt: order.created_at,
-      },
-    });
-
-    logger.info(`Order ${order.id} placed successfully for customer ${customerName}`);
   } catch (error) {
-    console.error('Error placing order:', error);
-    logger.error('Error placing order:', { error: error.message, stack: error.stack });
-    
+    logger.error('Error placing order:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to place order',
@@ -571,6 +630,11 @@ const cancelOrder = async (req, res) => {
     });
   }
 };
+
+// Initialize models when the module is loaded
+initializeModels().catch(error => {
+  logger.error('Failed to initialize models:', error);
+});
 
 module.exports = {
   placeOrder,

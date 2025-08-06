@@ -1,9 +1,8 @@
 const rateLimit = require('express-rate-limit');
-const config = require('../config/config');
 
 const rateLimiter = rateLimit({
-  windowMs: config.RATE_LIMIT.windowMs,
-  max: config.RATE_LIMIT.max,
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per windowMs
   message: {
     success: false,
     message: 'Too many requests from this IP, please try again later.',

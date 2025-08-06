@@ -31,6 +31,14 @@ app.use(express.urlencoded({ extended: true })); // URL encoding
 // Rate limiting
 app.use(rateLimiter);
 
+// Debug logging for routes
+app.use((req, res, next) => {
+  console.log('Request URL:', req.url);
+  console.log('Request Method:', req.method);
+  console.log('Request Headers:', req.headers);
+  next();
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({
@@ -41,8 +49,31 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Add this before the API routes mount
+app.get('/test', (req, res) => {
+  res.json({ message: 'Root test endpoint working' });
+});
+
 // API routes
 app.use(`/api/${config.API_VERSION}`, routes);
+
+// Add this right after mounting API routes
+app.get('/api/v1/test', (req, res) => {
+  res.json({ message: 'API test endpoint working' });
+});
+
+// List all registered routes
+console.log('Registered Routes:');
+function printRoutes(stack, path = '') {
+  stack.forEach(r => {
+    if (r.route) {
+      console.log(`${Object.keys(r.route.methods).join(', ').toUpperCase()} ${path}${r.route.path}`);
+    } else if (r.name === 'router') {
+      printRoutes(r.handle.stack, path + r.regexp.source.replace('^\\', '').replace('\\/?(?=\\/|$)', ''));
+    }
+  });
+}
+printRoutes(app._router.stack);
 
 // 404 handler
 app.use('*', (req, res) => {
