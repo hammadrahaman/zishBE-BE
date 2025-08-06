@@ -1,0 +1,5 @@
+
+
+node_modules/          # ← Ignore this specific folder
+*.log                  # ← Ignore ALL files ending with .log
+.env*                  # ← Ignore .env and .env.local, etc.
