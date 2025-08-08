@@ -6,10 +6,17 @@ async function initializeDatabase() {
   try {
     console.log('Initializing database...');
     
-    // Create Sequelize instance using the connection string
-    const sequelize = new Sequelize(config.PG_CONFIG.url, {
+    // Use the exact same connection string that works
+    const connectionString = 'postgresql://neondb_owner:npg_G52VKTncfOHF@ep-steep-resonance-a13uhpzv-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
+    
+    const sequelize = new Sequelize(connectionString, {
       dialect: 'postgres',
-      dialectOptions: config.PG_CONFIG.dialectOptions,
+      dialectOptions: {
+        ssl: {
+          require: true,
+          rejectUnauthorized: false
+        }
+      },
       logging: console.log
     });
 
@@ -22,6 +29,7 @@ async function initializeDatabase() {
     const Order = require('../models/Order')(sequelize);
     const OrderItem = require('../models/OrderItem')(sequelize);
     const OrderStatusHistory = require('../models/OrderStatusHistory')(sequelize);
+    const Feedback = require('../models/Feedback')(sequelize);
 
     // Set up associations
     Order.hasMany(OrderItem, { foreignKey: 'order_id', as: 'items' });
@@ -32,8 +40,8 @@ async function initializeDatabase() {
 
     // Sync all models
     console.log('Syncing database models...');
-    await sequelize.sync({ force: true }); // Be careful with force: true in production!
-    
+    await sequelize.sync({ force: true }); // This will sync all models including Feedback
+
     console.log('Database synchronized successfully');
     process.exit(0);
   } catch (error) {

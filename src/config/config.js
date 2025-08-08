@@ -8,16 +8,14 @@ module.exports = {
     PORT: process.env.PORT || 8000,
     API_VERSION: process.env.API_VERSION || 'v1',
     
-    // PostgreSQL config for Neon
+    // PostgreSQL config for local development
     PG_CONFIG: {
-      url: connectionString,
+      host: process.env.PG_HOST || 'localhost',
+      port: process.env.PG_PORT || 5432,
+      database: process.env.PG_DATABASE,
+      username: process.env.PG_USERNAME,
+      password: process.env.PG_PASSWORD,
       dialect: 'postgres',
-      dialectOptions: {
-        ssl: {
-          require: true,
-          rejectUnauthorized: false
-        }
-      },
       pool: {
         max: 5,
         min: 0,

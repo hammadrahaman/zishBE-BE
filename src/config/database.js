@@ -9,7 +9,7 @@ const logger = require('../utils/logger');
 const connectPostgreSQL = async () => {
   try {
     // Construct connection string with SSL parameters
-    const connectionString = `postgresql://${process.env.PG_USERNAME}:${process.env.PG_PASSWORD}@${process.env.PG_HOST}/${process.env.PG_DATABASE}?sslmode=require`;
+    const connectionString = 'postgresql://neondb_owner:npg_G52VKTncfOHF@ep-steep-resonance-a13uhpzv-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
 
     const sequelize = new Sequelize(connectionString, {
       dialect: 'postgres',

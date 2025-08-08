@@ -1,15 +1,30 @@
 const { Sequelize } = require('sequelize');
-const config = require('../config/config');
+const connectDatabase = require('../config/database');  // Import the database connection
 const FeedbackModel = require('../models/Feedback');
 const logger = require('../utils/logger');
 
-// Initialize Sequelize connection
-const sequelize = new Sequelize(config.PG_CONFIG);
-const Feedback = FeedbackModel(sequelize);
+let Feedback;
+
+// Initialize model with proper database connection
+const initializeModel = async () => {
+  try {
+    const sequelize = await connectDatabase();
+    Feedback = FeedbackModel(sequelize);
+    return Feedback;
+  } catch (error) {
+    logger.error('Failed to initialize Feedback model:', error);
+    throw error;
+  }
+};
 
 // Submit customer feedback
 const submitFeedback = async (req, res) => {
   try {
+    // Initialize model if not already initialized
+    if (!Feedback) {
+      await initializeModel();
+    }
+
     const { customerName, email, rating, feedback } = req.body;
 
     // Validate required fields
@@ -86,6 +101,9 @@ const submitFeedback = async (req, res) => {
 // Get all feedback (admin only) - UPDATED: No pagination limit
 const getAllFeedback = async (req, res) => {
   try {
+    if (!Feedback) {
+      await initializeModel();
+    }
     const {
       rating,
       search,
@@ -147,6 +165,9 @@ const getAllFeedback = async (req, res) => {
 // Get feedback statistics - UPDATED: Current month only
 const getFeedbackStats = async (req, res) => {
   try {
+    if (!Feedback) {
+      await initializeModel();
+    }
     // Get current month start and end dates
     const now = new Date();
     const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
