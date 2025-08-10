@@ -74,7 +74,7 @@ console.log('🔄 Attempting to load order controller...');
 
 try {
   const orderController = require('../controller/orderController');
-  const { placeOrder, getAllOrders, getOrdersByPhone, updateOrderStatus, updatePaymentStatus, cancelOrder } = orderController;
+  const { placeOrder, getAllOrders, getOrdersByPhone, updateOrderStatus, updatePaymentStatus, cancelOrder, getOrderStats } = orderController;
   
   console.log('✅ Order controller loaded successfully');
   
@@ -111,6 +111,7 @@ try {
   router.put('/:id/status', updateOrderStatus);
   router.put('/:id/payment', updatePaymentStatus);
   router.delete('/:id', cancelOrder);
+  router.get('/stats/orders', getOrderStats);
   
 } catch (error) {
   console.error('❌ Failed to load order controller:', error.message);

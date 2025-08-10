@@ -631,6 +631,36 @@ const cancelOrder = async (req, res) => {
   }
 };
 
+// Get orders statistics
+const getOrderStats = async (req, res) => {
+  try {
+    // Count orders where the DB date (in IST) matches today's date (IST)
+    const ordersToday = await Order.count({
+      where: {
+        [Sequelize.Op.and]: [
+          // Use Postgres timezone conversion to avoid Node/DB timezone mismatches
+          Sequelize.literal("DATE(created_at AT TIME ZONE 'Asia/Kolkata') = DATE(NOW() AT TIME ZONE 'Asia/Kolkata')"),
+          { order_status: { [Sequelize.Op.ne]: 'cancelled' } },
+        ],
+      },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        orders_today: ordersToday,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching order statistics:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch order statistics',
+      error: error.message,
+    });
+  }
+};
+
 // Initialize models when the module is loaded
 initializeModels().catch(error => {
   logger.error('Failed to initialize models:', error);
@@ -643,4 +673,5 @@ module.exports = {
   updateOrderStatus,
   updatePaymentStatus,
   cancelOrder,
+  getOrderStats,
 }; 
