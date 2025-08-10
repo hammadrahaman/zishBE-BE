@@ -53,11 +53,11 @@ const getDashboardStats = async (req, res) => {
   try {
     await ensureConnection();
 
-    // Pending orders: not delivered (completed) and not cancelled
+    // Pending orders: strictly orders with status 'pending'
     const [[{ pending_orders }]] = await sequelize.query(`
       SELECT COUNT(*)::int AS pending_orders
       FROM orders
-      WHERE order_status NOT IN ('cancelled','delivered')
+      WHERE order_status = 'pending'
     `);
 
     // Unpaid orders and amount (exclude cancelled)
