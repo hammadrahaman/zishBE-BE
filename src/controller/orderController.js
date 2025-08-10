@@ -200,7 +200,7 @@ const placeOrder = async (req, res) => {
 // Get all orders (admin)
 const getAllOrders = async (req, res) => {
   try {
-    const { page = 1, limit = 50, status, phone, startDate, endDate } = req.query;
+    const { page = 1, limit = 50, status, phone, startDate, endDate, paymentStatus, paymentMethod, customerName, orderId, orderNumber, item } = req.query;
     
     const offset = (page - 1) * limit;
     const whereClause = {};
@@ -214,6 +214,25 @@ const getAllOrders = async (req, res) => {
       whereClause.customer_phone = { [Sequelize.Op.like]: `%${phone}%` };
     }
 
+    // Customer name filter
+    if (customerName) {
+      whereClause.customer_name = { [Sequelize.Op.like]: `%${customerName}%` };
+    }
+
+    // Payment status filter
+    if (paymentStatus) {
+      whereClause.payment_status = paymentStatus;
+    }
+
+    // Order ID / number filter
+    const effectiveOrderId = orderId || orderNumber;
+    if (effectiveOrderId) {
+      const parsed = parseInt(effectiveOrderId, 10);
+      if (!Number.isNaN(parsed)) {
+        whereClause.id = parsed;
+      }
+    }
+
     if (startDate || endDate) {
       whereClause.created_at = {};
       if (startDate) {
@@ -224,12 +243,21 @@ const getAllOrders = async (req, res) => {
       }
     }
 
+    // Item name filter (on OrderItem)
+    const orderItemWhere = {};
+    const requireOrderItem = Boolean(item);
+    if (item) {
+      orderItemWhere.item_name = { [Sequelize.Op.iLike || Sequelize.Op.like]: `%${item}%` };
+    }
+
     const orders = await Order.findAndCountAll({
       where: whereClause,
       include: [
         {
           model: OrderItem,
           as: 'items',
+          where: requireOrderItem ? orderItemWhere : undefined,
+          required: requireOrderItem,
           include: [
             {
               model: MenuItem,
