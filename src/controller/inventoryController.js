@@ -249,3 +249,131 @@ const getInventoryStats = async (req, res) => {
 };
 
 module.exports.getInventoryStats = getInventoryStats;
+
+// -------- Inventory Expenses Insights (purchased orders) ---------
+// GET /api/v1/inventory/insights?start=YYYY-MM-DD&end=YYYY-MM-DD
+const getInventoryExpensesInsights = async (req, res) => {
+  try {
+    await ensureConnection();
+    const { start, end } = req.query;
+
+    const [rows] = await sequelize.query(
+      `WITH filtered_orders AS (
+         SELECT o.id, o.ordered_by, o.purchased_at
+         FROM inventory_orders o
+         WHERE o.status = 'purchased'
+           AND (COALESCE(:start::date, DATE '-infinity') <= o.purchased_at)
+           AND (o.purchased_at < COALESCE(:end::date, DATE 'infinity') + INTERVAL '1 day')
+       ),
+       lines AS (
+         SELECT oi.*, fo.ordered_by, fo.purchased_at
+         FROM inventory_order_items oi
+         JOIN filtered_orders fo ON fo.id = oi.order_id
+       ),
+       by_item AS (
+         SELECT item_name_snapshot AS name,
+                SUM(quantity) AS quantity,
+                SUM(line_amount) AS amount
+         FROM lines
+         GROUP BY item_name_snapshot
+       ),
+       by_user AS (
+         SELECT ordered_by AS name,
+                SUM(line_amount) AS amount,
+                COUNT(*) AS orders
+         FROM lines
+         GROUP BY ordered_by
+       )
+       SELECT 
+         COALESCE((SELECT COUNT(*) FROM lines), 0)::int AS total_items_purchased,
+         COALESCE((SELECT SUM(quantity) FROM lines), 0)::numeric AS total_quantity_purchased,
+         COALESCE((SELECT SUM(line_amount) FROM lines), 0)::numeric AS total_amount_spent,
+         COALESCE((SELECT COUNT(DISTINCT item_name_snapshot) FROM lines), 0)::int AS unique_items,
+         COALESCE((SELECT SUM(line_amount) FROM lines) / NULLIF((SELECT COUNT(*) FROM lines), 0), 0)::numeric AS average_order_value,
+         COALESCE((SELECT COUNT(*) FROM lines), 0)::int AS purchase_count,
+         (
+           SELECT json_build_object('name', name, 'quantity', quantity, 'amount', amount)
+           FROM by_item
+           ORDER BY amount DESC
+           LIMIT 1
+         ) AS most_purchased_item,
+         (
+           SELECT json_build_object('name', name, 'amount', amount, 'orders', orders)
+           FROM by_user
+           ORDER BY amount DESC
+           LIMIT 1
+         ) AS top_spender
+      `,
+      { replacements: { start: start || null, end: end || null } }
+    );
+
+    const row = rows[0] || {};
+    return res.json({ success: true, data: {
+      total_items_purchased: Number(row.total_items_purchased || 0),
+      total_quantity_purchased: Number(row.total_quantity_purchased || 0),
+      total_amount_spent: Number(row.total_amount_spent || 0),
+      unique_items: Number(row.unique_items || 0),
+      average_order_value: Number(row.average_order_value || 0),
+      purchase_count: Number(row.purchase_count || 0),
+      most_purchased_item: row.most_purchased_item || null,
+      top_spender: row.top_spender || null,
+    }});
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Failed to get inventory expenses insights', error: String(err) });
+  }
+};
+
+// GET /api/v1/inventory/insights/export?start=YYYY-MM-DD&end=YYYY-MM-DD
+const exportInventoryExpensesInsightsCsv = async (req, res) => {
+  try {
+    // Reuse the computation by calling the function above indirectly
+    req.query = req.query || {};
+    await ensureConnection();
+
+    // Compute insights first
+    const { start, end } = req.query;
+    const reqClone = { query: { start, end } };
+    const fakeRes = { jsonPayload: null, json(obj) { this.jsonPayload = obj; } };
+    await getInventoryExpensesInsights(reqClone, fakeRes);
+    const data = fakeRes.jsonPayload ? fakeRes.jsonPayload.data : null;
+
+    if (!data) {
+      return res.status(500).json({ success: false, message: 'Failed to generate export' });
+    }
+
+    const rows = [];
+    rows.push(['Inventory Expenses Report']);
+    rows.push(['Period:', `${start || 'beginning'} to ${end || 'now'}`]);
+    rows.push([]);
+    rows.push(['Metric', 'Value']);
+    rows.push(['Total Items Purchased', data.total_items_purchased]);
+    rows.push(['Total Quantity Purchased', data.total_quantity_purchased]);
+    rows.push(['Total Amount Spent (₹)', data.total_amount_spent]);
+    rows.push(['Unique Items', data.unique_items]);
+    rows.push(['Average Order Value', data.average_order_value]);
+    rows.push(['Purchase Count', data.purchase_count]);
+    if (data.most_purchased_item) {
+      rows.push([]);
+      rows.push(['Most Purchased Item', `${data.most_purchased_item.name}`]);
+      rows.push(['Quantity', data.most_purchased_item.quantity]);
+      rows.push(['Amount (₹)', data.most_purchased_item.amount]);
+    }
+    if (data.top_spender) {
+      rows.push([]);
+      rows.push(['Top Spender', `${data.top_spender.name}`]);
+      rows.push(['Amount (₹)', data.top_spender.amount]);
+      rows.push(['Orders', data.top_spender.orders]);
+    }
+
+    const csv = rows.map(r => r.map(c => `"${c}"`).join(',')).join('\n');
+    res.setHeader('Content-Type', 'text/csv');
+    const filename = `inventory-expenses-${(start || 'all')}-${(end || 'now')}.csv`;
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.status(200).send(csv);
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Failed to export inventory expenses', error: String(err) });
+  }
+};
+
+module.exports.getInventoryExpensesInsights = getInventoryExpensesInsights;
+module.exports.exportInventoryExpensesInsightsCsv = exportInventoryExpensesInsightsCsv;
