@@ -5,6 +5,7 @@ const menuRoutes = require('./menuRoutes');
 const feedbackRoutes = require('./feedbackRoutes');
 const orderRoutes = require('./orderRoutes');
 const statsRoutes = require('./statsRoutes');
+const inventoryRoutes = require('./inventoryRoutes');
 
 const router = express.Router();
 
@@ -15,6 +16,7 @@ router.use('/menu', menuRoutes);
 router.use('/feedback', feedbackRoutes);
 router.use('/orders', orderRoutes);
 router.use('/stats', statsRoutes);
+router.use('/inventory', inventoryRoutes);
 
 // Default API info
 router.get('/', (req, res) => {
