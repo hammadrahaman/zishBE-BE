@@ -1,5 +1,5 @@
 const express = require('express');
-const { getRevenueStats, getDashboardStats, exportDashboardCsv } = require('../controller/statsController');
+const { getRevenueStats, getDashboardStats, exportDashboardCsv, getSalesInsights, getOrdersInsights } = require('../controller/statsController');
 
 const router = express.Router();
 
@@ -7,6 +7,8 @@ const router = express.Router();
 router.get('/revenue', getRevenueStats);
 router.get('/dashboard', getDashboardStats);
 router.get('/dashboard/export', exportDashboardCsv);
+router.get('/sales', getSalesInsights);
+router.get('/orders-insights', getOrdersInsights);
 
 module.exports = router;
 
