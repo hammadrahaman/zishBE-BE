@@ -32,7 +32,11 @@ module.exports = {
       
     // Logging
     LOG_LEVEL: process.env.LOG_LEVEL || 'info',
+    // JWT
+    JWT_SECRET: process.env.JWT_SECRET || 'Jg59DMXcmT5AG6k5aLLg-t1NIv28SFaHCeSQPAG0ZZeOi6g5sD9kKWenAG4SlXfT1qh5S9F0qt4CxLSsV3SY8Q',
+    JWT_EXPIRE: process.env.JWT_EXPIRE || '7d',
 
+    // Rate limiting
     // Rate limiting
     RATE_LIMIT: {
       windowMs: 15 * 60 * 1000, // 15 minutes

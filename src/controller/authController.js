@@ -1,9 +1,20 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const config = require('../config/config');
-const User = require('../models/User');
 const { sendResponse, sendError } = require('../utils/responseHandler');
 const logger = require('../utils/logger');
+const connectDatabase = require('../config/database');
+const UserSqlModel = require('../models/UserSql');
+
+let sequelize;
+let UserSql;
+
+async function initUserModel() {
+  if (UserSql) return UserSql;
+  sequelize = await connectDatabase();
+  UserSql = UserSqlModel(sequelize);
+  return UserSql;
+}
 
 // Generate JWT token
 const generateToken = (userId) => {
@@ -12,14 +23,15 @@ const generateToken = (userId) => {
   });
 };
 
-// Register new user
+// Register new user (Postgres)
 const register = async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { username, password, role } = req.body;
+    const User = await initUserModel();
 
     // Check if user exists
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
+    const existing = await User.findOne({ where: { username } });
+    if (existing) {
       return sendError(res, 'User already exists', 400);
     }
 
@@ -28,24 +40,22 @@ const register = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, salt);
 
     // Create user
-    const user = new User({
-      name,
-      email,
+    const user = await User.create({
+      username,
       password: hashedPassword,
+      role: role || 'user',
     });
 
-    await user.save();
-
     // Generate token
-    const token = generateToken(user._id);
+    const token = generateToken(user.id);
 
-    logger.info(`New user registered: ${email}`);
+    logger.info(`New user registered: ${username}`);
 
     sendResponse(res, {
       user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
+        id: user.id,
+        username: user.username,
+        role: user.role,
       },
       token,
     }, 'User registered successfully', 201);
@@ -55,13 +65,14 @@ const register = async (req, res) => {
   }
 };
 
-// Login user
+// Login user (Postgres)
 const login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { username, password } = req.body;
+    const User = await initUserModel();
 
     // Check if user exists
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ where: { username, is_active: true } });
     if (!user) {
       return sendError(res, 'Invalid credentials', 401);
     }
@@ -72,16 +83,19 @@ const login = async (req, res) => {
       return sendError(res, 'Invalid credentials', 401);
     }
 
-    // Generate token
-    const token = generateToken(user._id);
+    // Update last_login
+    await user.update({ last_login: new Date() });
 
-    logger.info(`User logged in: ${email}`);
+    // Generate token
+    const token = generateToken(user.id);
+
+    logger.info(`User logged in: ${username}`);
 
     sendResponse(res, {
       user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
+        id: user.id,
+        username: user.username,
+        role: user.role,
       },
       token,
     }, 'Login successful');
@@ -91,14 +105,12 @@ const login = async (req, res) => {
   }
 };
 
-// Get current user profile
+// Get current user profile (Postgres)
 const getProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user.userId).select('-password');
-    if (!user) {
-      return sendError(res, 'User not found', 404);
-    }
-
+    const User = await initUserModel();
+    const user = await User.findByPk(req.user.userId, { attributes: { exclude: ['password'] } });
+    if (!user) return sendError(res, 'User not found', 404);
     sendResponse(res, user, 'Profile retrieved successfully');
   } catch (error) {
     logger.error('Get profile error:', error);
